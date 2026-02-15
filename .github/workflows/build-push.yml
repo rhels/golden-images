@@ -5,11 +5,19 @@ on:
     branches: ["main"]
     paths:
       - "openclaw-tools/**"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "openclaw-tools/**"
+  schedule:
+    # Weekly Trivy scan - Sundays at 06:00 UTC
+    - cron: "0 6 * * 0"
   workflow_dispatch: {}
 
 permissions:
   contents: read
   packages: write
+  security-events: write
 
 jobs:
   build:
@@ -31,10 +39,48 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5.7.0
+        with:
+          images: ghcr.io/rhels/openclaw-tools
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=
+
       - name: Build and push
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: ./openclaw-tools
           file: ./openclaw-tools/Dockerfile
-          push: true
-          tags: ghcr.io/rhels/openclaw-tools:latest
+          push: ${{ github.event_name != 'pull_request' }}
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ghcr.io/rhels/openclaw-tools:latest
+          format: table
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+      - name: Run Trivy scanner (SARIF)
+        if: always()
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ghcr.io/rhels/openclaw-tools:latest
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+      - name: Upload Trivy scan results to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif

@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  standards:
+    uses: rhels/.github/.github/workflows/repo-standards.yml@main
+    with:
+      require-contributing: false
+
+  secrets:
+    uses: rhels/.github/.github/workflows/secret-scan.yml@main
+
+  shellcheck:
+    uses: rhels/.github/.github/workflows/shellcheck.yml@main
+    with:
+      severity: warning
+
+  build-scan:
+    uses: rhels/.github/.github/workflows/container-build-scan-push.yml@main
+    with:
+      image-name: ghcr.io/rhels/openclaw-tools
+      image-tag: ${{ github.sha }}
+      push: false
+    secrets: inherit

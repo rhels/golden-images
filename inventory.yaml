@@ -1,0 +1,117 @@
+# Golden Images Inventory
+# Machine-readable catalog of all approved base images for the RHELS platform.
+# Used by automation for: vulnerability scanning, image freshness checks,
+# Dockerfile validation, and Kyverno registry policies.
+#
+# Schema:
+#   name: Human-readable image name
+#   registry: Full registry path (without tag)
+#   tag: Default tag (or "latest")
+#   type: build | runtime | tooling
+#   language: java | nodejs | python | multi (or null for tooling)
+#   source: redhat | ghcr-rhels
+#   owner: Team responsible for updates
+#   scan_schedule: cron expression for vulnerability scanning
+#   approved_registries: List of registries this image is approved from
+#   notes: Additional context
+
+images:
+  # ── Red Hat Language Images (Build Stage) ──────────────────────────
+  - name: ubi9-openjdk-21
+    registry: registry.access.redhat.com/ubi9/openjdk-21
+    tag: latest
+    type: build
+    language: java
+    source: redhat
+    owner: platform-team
+    scan_schedule: "0 6 * * 1"  # Weekly Monday 6am
+    notes: "Includes Maven 3.9 + JDK 21. S2I scripts included but unused."
+
+  - name: ubi9-nodejs-22
+    registry: registry.access.redhat.com/ubi9/nodejs-22
+    tag: latest
+    type: build
+    language: nodejs
+    source: redhat
+    owner: platform-team
+    scan_schedule: "0 6 * * 1"
+    notes: "Includes npm + node-gyp + compilers for native modules."
+
+  - name: ubi9-python-312
+    registry: registry.access.redhat.com/ubi9/python-312
+    tag: latest
+    type: build
+    language: python
+    source: redhat
+    owner: platform-team
+    scan_schedule: "0 6 * * 1"
+    notes: "Includes pip + python-devel + gcc for C-extension builds."
+
+  # ── Red Hat Language Images (Runtime Stage) ────────────────────────
+  - name: ubi9-openjdk-21-runtime
+    registry: registry.access.redhat.com/ubi9/openjdk-21-runtime
+    tag: latest
+    type: runtime
+    language: java
+    source: redhat
+    owner: platform-team
+    scan_schedule: "0 6 * * 1"
+    notes: "JRE only — no JDK tools, no Maven. Default UID 185."
+
+  - name: ubi9-nodejs-22-minimal
+    registry: registry.access.redhat.com/ubi9/nodejs-22-minimal
+    tag: latest
+    type: runtime
+    language: nodejs
+    source: redhat
+    owner: platform-team
+    scan_schedule: "0 6 * * 1"
+    notes: "Node.js runtime only — no compilers. ~70MB compressed. Default UID 1001."
+
+  - name: ubi9-python-312-minimal
+    registry: registry.access.redhat.com/ubi9/python-312-minimal
+    tag: latest
+    type: runtime
+    language: python
+    source: redhat
+    owner: platform-team
+    scan_schedule: "0 6 * * 1"
+    notes: "Python runtime only — no compilers, no python-devel. Default UID 1001."
+
+  # ── UBI Base Images ────────────────────────────────────────────────
+  - name: ubi9-minimal
+    registry: registry.access.redhat.com/ubi9/ubi-minimal
+    tag: latest
+    type: runtime
+    language: null
+    source: redhat
+    owner: platform-team
+    scan_schedule: "0 6 * * 1"
+    notes: "Generic minimal base. Use language-specific images instead where possible."
+
+  # ── Platform Tooling Images ────────────────────────────────────────
+  - name: openclaw-tools
+    registry: ghcr.io/rhels/openclaw-tools
+    tag: latest
+    type: tooling
+    language: multi
+    source: ghcr-rhels
+    owner: platform-team
+    scan_schedule: "0 6 * * 1"
+    notes: "OpenClaw base + Atlassian CLI. Used by bot infrastructure."
+
+# Approved registries for Kyverno policy enforcement
+approved_registries:
+  - registry.access.redhat.com/
+  - registry.redhat.io/
+  - ghcr.io/rhels/
+  - quay.io/  # Specific images only
+
+# Scanning configuration
+scanning:
+  tool: trivy
+  severity_threshold: "HIGH,CRITICAL"
+  ignore_unfixed: true
+  output_format: sarif
+  notification_channel: discord
+  auto_pr: true  # Auto-create PR when base image has updates

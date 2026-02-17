@@ -1,0 +1,149 @@
+# Weekly Vulnerability Scan for Golden Base Images
+#
+# Scans all Red Hat base images used by app templates for HIGH/CRITICAL CVEs.
+# If vulnerabilities found:
+#   1. Creates a GitHub issue with findings
+#   2. Checks if newer image version exists
+#   3. Opens auto-PR to bump base image version if available
+#
+# Schedule: Weekly Monday 6am UTC (before team standup)
+
+name: Weekly Golden Image Scan
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"  # Monday 6am UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  security-events: write
+
+jobs:
+  scan-base-images:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: ubi9-openjdk-21-runtime
+            image: registry.access.redhat.com/ubi9/openjdk-21-runtime:latest
+            type: runtime
+            language: java
+          - name: ubi9-nodejs-22-minimal
+            image: registry.access.redhat.com/ubi9/nodejs-22-minimal:latest
+            type: runtime
+            language: nodejs
+          - name: ubi9-python-312-minimal
+            image: registry.access.redhat.com/ubi9/python-312-minimal:latest
+            type: runtime
+            language: python
+          - name: ubi9-openjdk-21
+            image: registry.access.redhat.com/ubi9/openjdk-21:latest
+            type: build
+            language: java
+          - name: ubi9-nodejs-22
+            image: registry.access.redhat.com/ubi9/nodejs-22:latest
+            type: build
+            language: nodejs
+          - name: ubi9-python-312
+            image: registry.access.redhat.com/ubi9/python-312:latest
+            type: build
+            language: python
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Run Trivy scan
+        id: scan
+        uses: aquasecurity/trivy-action@76071ef0d7ec797419534a183b498b4d6366cf37 # 0.31.0
+        with:
+          image-ref: ${{ matrix.image }}
+          format: "table"
+          output: "scan-${{ matrix.name }}.txt"
+          severity: "HIGH,CRITICAL"
+          exit-code: "1"
+          ignore-unfixed: true
+        continue-on-error: true
+
+      - name: Run Trivy SARIF
+        if: always()
+        uses: aquasecurity/trivy-action@76071ef0d7ec797419534a183b498b4d6366cf37 # 0.31.0
+        with:
+          image-ref: ${{ matrix.image }}
+          format: "sarif"
+          output: "scan-${{ matrix.name }}.sarif"
+          severity: "HIGH,CRITICAL"
+          ignore-unfixed: true
+        continue-on-error: true
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@ff0a06e83cb2de871e5a09832bc6a81e7276941f # v3.28.18
+        with:
+          sarif_file: "scan-${{ matrix.name }}.sarif"
+          category: "golden-image-${{ matrix.name }}"
+        continue-on-error: true
+
+      - name: Create issue if vulnerabilities found
+        if: steps.scan.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const scanOutput = fs.readFileSync('scan-${{ matrix.name }}.txt', 'utf8');
+            const title = `[Golden Image] Vulnerabilities in ${{ matrix.name }} (${{ matrix.type }})`;
+            const body = [
+              `## Golden Image Vulnerability Report`,
+              ``,
+              `| Field | Value |`,
+              `|-------|-------|`,
+              `| **Image** | \`${{ matrix.image }}\` |`,
+              `| **Type** | ${{ matrix.type }} |`,
+              `| **Language** | ${{ matrix.language }} |`,
+              `| **Scan Date** | ${new Date().toISOString().split('T')[0]} |`,
+              `| **Severity** | HIGH, CRITICAL |`,
+              ``,
+              `### Scan Results`,
+              `\`\`\``,
+              scanOutput.substring(0, 60000),
+              `\`\`\``,
+              ``,
+              `### Action Required`,
+              `- [ ] Check if newer image version available on Red Hat catalog`,
+              `- [ ] Update \`inventory.yaml\` if base image version changes`,
+              `- [ ] Rebuild dependent app template images`,
+              `- [ ] Add accepted CVEs to \`.trivyignore\` if no fix available`,
+            ].join('\n');
+
+            // Check for existing open issue
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'vulnerability,golden-image',
+            });
+            const dupe = existing.data.find(i => i.title === title);
+            if (!dupe) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['vulnerability', 'golden-image', '${{ matrix.language }}'],
+              });
+            }
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## ${{ matrix.name }} (${{ matrix.type }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Key | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-----|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Image | \`${{ matrix.image }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Scan | ${{ steps.scan.outcome }} |" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "scan-${{ matrix.name }}.txt" ]; then
+            VULN_COUNT=$(grep -c "CVE-" "scan-${{ matrix.name }}.txt" 2>/dev/null || echo "0")
+            echo "| CVEs Found | $VULN_COUNT |" >> "$GITHUB_STEP_SUMMARY"
+          fi

@@ -1,0 +1,11 @@
+# Trivy configuration for golden-images
+# https://aquasecurity.github.io/trivy/latest/docs/references/configuration/config-file/
+severity:
+  - HIGH
+  - CRITICAL
+
+ignore-unfixed: true
+
+exit-code: 1
+
+format: table
